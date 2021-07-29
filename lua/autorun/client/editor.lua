@@ -1,5 +1,3 @@
-rgedit = {ui={},vars = {["show_bounds"] = true, ["show_class"] = true, }}
-
 rgedit.editdata = {
     selected = nil,
     ents_list = {}
@@ -8,7 +6,7 @@ rgedit.editdata = {
 
 for i = 1, 50 do
     surface.CreateFont( "rgedit.font."..i, {
-        font = "Roboto", -- Use the font-name which is shown to you by your operating system Font Viewer, not the file name
+        font = "Roboto",
         size = i,
         weight = 500,
         antialias = true,
@@ -18,7 +16,7 @@ end
 
 for i = 1, 50 do
     surface.CreateFont( "rgedit.font.mini."..i, {
-        font = "Roboto", -- Use the font-name which is shown to you by your operating system Font Viewer, not the file name
+        font = "Roboto",
         size = i,
         weight = 1,
         antialias = true,
@@ -26,8 +24,7 @@ for i = 1, 50 do
     
 end
 
-concommand.Add("rgeditor_gui", function( ply, cmd, args )
-
+local function OpenRGEditor()
     local traceScreen = util.QuickTrace(LocalPlayer():GetShootPos(), gui.ScreenToVector(gui.MousePos()) * 1000,LocalPlayer())
 
     hook.Add("PreDrawOpaqueRenderables","rgedit.DrawBoxs",function()
@@ -41,8 +38,10 @@ concommand.Add("rgeditor_gui", function( ply, cmd, args )
             if !IsValid(v)then rgedit.editdata.ents_list[k] = nil continue end
 
             if (!rgedit.vars["show_bounds"] and rgedit.editdata.selected ~= v ) then  continue end
+
+            local min,max = v:GetRenderBounds()
             render.SetMaterial( Material( "vgui/white" ) )
-            render.DrawBox( v:GetPos(), v:GetAngles(), v:OBBMins(), v:OBBMaxs(), rgedit.editdata.selected == v and Color( 255, 238, 0,50) or Color( 255, 255, 255,50 ) )
+            render.DrawBox( v:GetPos(), v:GetAngles(), min, max, rgedit.editdata.selected == v and Color( 255, 238, 0,50) or Color( 255, 255, 255,50 ) )
             
 
         end
@@ -86,9 +85,9 @@ concommand.Add("rgeditor_gui", function( ply, cmd, args )
     function rgedit.CreateItem(iType,class)
         local iClass = {}
         if iType == "SWEP" then
-            iClass = {classTable = weapons.Get( class ), class = class, model = weapons.Get( class ).WorldModel}
+            iClass = {classTable = weapons.Get( class ), class = class, model = weapons.Get( class ).WorldModel,type = iType}
         else
-            iClass = {classTable = scripted_ents.Get( class ), class = class, model = scripted_ents.Get( class ).Model}
+            iClass = {classTable = scripted_ents.Get( class ), class = class, model = scripted_ents.Get( class ).Model,type = iType}
         end
         local ent = ents.CreateClientProp()
         ent:SetPos( LocalPlayer():GetEyeTrace().HitPos )
@@ -271,7 +270,7 @@ concommand.Add("rgeditor_gui", function( ply, cmd, args )
 
             for k,v in pairs(scripted_ents.GetList()) do
                 if !v.t.Model then continue end
-                if (!string.find(string.lower(v.t.ClassName),string.lower(self:GetValue())))  and self:GetValue() ~= "" then continue end
+                if (!string.find(string.lower(k),string.lower(self:GetValue()))) and self:GetValue() ~= "" then continue end
 
                 local SpawnIcon = rgedit.ui.EntsList.List:Add( "DButton" )
                 SpawnIcon:SetSize( 66, 66 )
@@ -370,6 +369,43 @@ concommand.Add("rgeditor_gui", function( ply, cmd, args )
         Menu:Open()
         
     end)
+
+    if rgedit.CanAccess(LocalPlayer(),"SAVEENTS") then
+        rgedit.ui.Header.AddButton("rgplay/icons.48/save.png","test",function()
+
+            local prepared = {}
+
+            for k,v in pairs(rgedit.editdata.ents_list) do
+                prepared[#prepared+1] = {
+                    pos = v:GetPos(),
+                    ang = v:GetAngles(),
+                    class = v.dataClass.classTable.class,
+                    type = v.dataClass.classTable.type
+                }
+            end
+
+  
+            -- local iClass = {}
+            -- if iType == "SWEP" then
+            --     iClass = {classTable = weapons.Get( class ), class = class, model = weapons.Get( class ).WorldModel}
+            -- else
+            --     iClass = {classTable = scripted_ents.Get( class ), class = class, model = scripted_ents.Get( class ).Model}
+            -- end
+            -- local ent = ents.CreateClientProp()
+            -- ent:SetPos( LocalPlayer():GetEyeTrace().HitPos )
+            -- ent:SetModel( iClass.model )
+            -- local id = #rgedit.editdata.ents_list + 1
+            -- ent.dataClass = {classTable = iClass, id = id}
+            -- ent:Spawn()
+
+            -- rgedit.editdata.ents_list[id] = ent
+            
+            net.Start("rgeditor.hook")
+            net.WriteString("SAVEENTS")
+            net.WriteTable(prepared)
+            net.SendToServer()
+        end)
+    end
 
     rgedit.ui.Header.AddButton("rgplay/icons.48/exit.png","Exit",function() 
         for k,v in pairs(rgedit.ui) do
@@ -529,7 +565,7 @@ concommand.Add("rgeditor_gui", function( ply, cmd, args )
                 local entPos = rgedit.editdata.selected:GetPos()
 
                 icon:SetModel( rgedit.editdata.selected:GetModel() )
-                local mn, mx = icon.Entity:GetRenderBounds()
+                local mn, mx = icon.Entity:GetModelRenderBounds()
                 local size = 0
                 size = math.max( size, math.abs(mn.x) + math.abs(mx.x) )
                 size = math.max( size, math.abs(mn.y) + math.abs(mx.y) )
@@ -779,4 +815,47 @@ concommand.Add("rgeditor_gui", function( ply, cmd, args )
         end
 
     end)
+end
+
+net.Receive( "rgeditor.hook", function( len )
+    local tab =  net.ReadTable()
+    if !tab then
+        print("[RGEDITOR] Invalid net by SERVER")
+        return
+    end
+
+    for k,v in pairs(rgedit.editdata.ents_list) do
+        if IsValid(v) then
+            v:Remove()
+        end
+        rgedit.editdata.ents_list[k] = nil
+
+    end
+
+    for k,v in pairs(tab) do
+        local iClass = {}
+        if v.type == "SWEP" then
+            iClass = {classTable = weapons.Get( v.class ), class = v.class, model = weapons.Get( v.class ).WorldModel,type = v.type}
+        else
+            iClass = {classTable = scripted_ents.Get( v.class ), class = v.class, model = scripted_ents.Get( v.class ).Model,type = v.type}
+        end
+        local ent = ents.CreateClientProp()
+        ent:SetPos( v.pos )
+        ent:SetAngles( v.ang )
+        ent:SetModel( iClass.model )
+        local id = #rgedit.editdata.ents_list + 1
+        ent.dataClass = {classTable = iClass, id = id}
+        ent:Spawn()
+
+        rgedit.editdata.ents_list[id] = ent
+    end
+
+    OpenRGEditor()
+end)
+
+concommand.Add("rgeditor_gui", function( ply, cmd, args )
+    net.Start("rgeditor.hook")
+    net.WriteString("OPENMENU")
+    net.WriteTable({})
+    net.SendToServer()
 end)
