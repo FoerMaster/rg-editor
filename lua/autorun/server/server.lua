@@ -45,6 +45,7 @@ end
 function rgedit.SpawnEnts()
     for k,v in pairs(rgedit.ents) do
         local ent = ents.Create( v.class )
+        if ( !IsValid( ent ) ) then print("[RGEDITOR] Class not found "..v.class) continue end
         ent:SetPos( v.pos )
         ent:SetAngles( v.ang )
         ent:Spawn()
